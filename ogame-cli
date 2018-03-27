@@ -1,0 +1,10 @@
+#!/bin/sh
+SCRIPT_ROOT="$(cd $(dirname $0) && echo $PWD)"
+cd $SCRIPT_ROOT
+
+if ! hash casperjs; then
+	echo "casperjs not found in the PATH"
+	exit
+fi
+
+casperjs --disk-cache=true ogame-cli.js "$@"
