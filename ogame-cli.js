@@ -69,25 +69,27 @@ function format_date(m) {
 	       + ':' + ('0' + m.getSeconds()).slice(-2);
 }
 
-newline = true;
-
-function stderr(s) {
-	if (newline) {
-		var d = new Date();
-		system.stderr.write(format_date(d) + ' ');
+class Logger {
+	constructor(filename) {
+		this.file = fs.open(filename, {mode: "a", nobuffer: true});
+		this.newline = true;
 	}
-	system.stderr.write(s);
-	newline = false;
-}
 
-function stderrLine(s) {
-	stderr(s + '\n')
-	newline = true;
+	write(s) {
+		if (this.newline)
+			this.file.write(format_date(new Date()) + ' ');
+		this.file.write(s);
+		this.newline = false;
+	}
+	writeLine(s) {
+		this.write(s + '\n');
+		this.newline = true;
+	}
 }
 
 function login() {
 	casper.waitForSelector('#loginBtn', function() {
-		stderr('login page open; ');
+		logger.write('login page open; ');
 		output_array['logged_in'] = false;
 
 		this.click('#loginBtn');
@@ -97,16 +99,16 @@ function login() {
 			'pass': config['password'],
 		}, true);
 		this.waitForSelector('#detailWrapper', function() {
-			stderrLine('login done.');
+			logger.writeLine('login done.');
 		}, function() {
-			stderrLine('derp.');
-			stderrLine('ERROR: Login messed up, exiting.');
+			logger.writeLine('derp.');
+			logger.writeLine('ERROR: Login messed up, exiting.');
 			this.capture(screenshot_dir + 'screenshot_derp.png');
 			this.exit();
 		});
 
 	}, function() {
-		stderrLine('could not find login button.');
+		logger.writeLine('could not find login button.');
 		current_mission = 0;
 	});
 }
@@ -115,21 +117,21 @@ function open_fleet_movements() {
 	casper.thenOpen(base_url + 'page=movement');
 
 	casper.waitForSelector('div.fleetStatus span.fleetSlots', function() {
-		stderrLine('Fleet movements opened.');
+		logger.writeLine('Fleet movements opened.');
 
 	}, function() {
-		stderr('Could not open fleet movements; ')
+		logger.write('Could not open fleet movements; ')
 
 		if (this.exists('a#continue')) {
-			stderrLine('No movements at this moment.');
+			logger.writeLine('No movements at this moment.');
 
 		} else if (this.exists('#loginBtn')) {
-			stderrLine('Upsie, logged out.');
-			phantom.cookies = "";
+			logger.writeLine('Upsie, logged out.');
+			phantom.clearCookies();
 			login();
 			open_fleet_movements();
 		} else {
-			stderrLine('Still logged in but something went wrong.');
+			logger.writeLine('Still logged in but something went wrong.');
 		}
 	});
 }
@@ -137,12 +139,12 @@ function open_fleet_movements() {
 var takeoff = 0;
 
 function verifyLogin(msg) {
-	stderr(msg + '; ')
+	logger.write(msg + '; ')
 	if (casper.exists('#loginBtn')) {
-		stderrLine('Upsie, logged out.');
+		logger.writeLine('Upsie, logged out.');
 		recovery();
 	} else {
-		stderrLine('Still logged in but something went wrong.');
+		logger.writeLine('Still logged in but something went wrong.');
 		current_mission = 0;
 	}
 	screenshot('screenshot1.png')
@@ -155,7 +157,7 @@ function select_ships(planned_mission, planet, ships) {
 		current_mission = planned_mission;
 
 		this.waitForSelector('div.fleetStatus div#slots', function() {
-			stderr(planet + ': fleet ');
+			logger.write(planet + ': fleet ');
 
 			if (this.exists('a#continue')) {
 
@@ -166,12 +168,12 @@ function select_ships(planned_mission, planet, ships) {
 
 				if (this.exists('a#continue.on')) {
 					this.thenClick('#continue');
-					stderr('selected; ');
+					logger.write('selected; ');
 					return;
 				}
 			}
 
-			stderrLine('WARNING: No fleet available to send on ' + planet);
+			logger.writeLine('WARNING: No fleet available to send on ' + planet);
 			current_mission = 0;
 
 		}, function() {
@@ -185,14 +187,14 @@ function select_destination(planned_mission, system, position, type, speed) {
 		if (current_mission != planned_mission)
 			return;
 		this.waitForSelector('form[name="details"]', function then() {
-			stderr('destination ');
+			logger.write('destination ');
 			this.fill('form[name="details"]', {
 				'type': String(type),
 				'speed': String(speed/10),
 				'system': String(system),
 				'position': String(position),
 			}, true);
-			stderr('selected; ');
+			logger.write('selected; ');
 
 		}, function timeout() {
 			verifyLogin('Could not continue to destination page');
@@ -205,7 +207,7 @@ function send_mission(planned_mission, type, resources) {
 		if (current_mission != planned_mission)
 			return;
 		this.waitForSelector('a#start', function then() {
-			stderr('mission ');
+			logger.write('mission ');
 			screenshot('bug.png');
 
 			if (type === mission.TRANSPORT)
@@ -229,9 +231,9 @@ function send_mission(planned_mission, type, resources) {
 
 			if (this.exists('a#start.on')) {
 				this.thenClick('a#start');
-				stderr('selected; ')
+				logger.write('selected; ')
 			} else {
-				stderrLine('WARNING: Could not send fleet for some reason.')
+				logger.writeLine('WARNING: Could not send fleet for some reason.')
 				current_mission = 0;
 			}
 
@@ -244,15 +246,15 @@ function send_mission(planned_mission, type, resources) {
 		if (current_mission != planned_mission)
 			return;
 		this.waitForSelector('div.fleetStatus div#slots', function then() {
-			stderrLine('on route.');
+			logger.writeLine('on route.');
 
 		}, function timeout() {
-			stderr('Could not submit mission; ')
+			logger.write('Could not submit mission; ')
 
 			if (this.exists('#loginBtn')) {
-				stderrLine('Upsie, logged out, Fleet probably not on route.');
+				logger.writeLine('Upsie, logged out, Fleet probably not on route.');
 			} else {
-				stderrLine('Still logged in but something went wrong, fleet probably not on route.');
+				logger.writeLine('Still logged in but something went wrong, fleet probably not on route.');
 			}
 		});
 	});
@@ -270,7 +272,7 @@ function send_fleet(origem, destino, speed, mission_type, ships) {
 	mission_counter++;
 
 	recovery = function() {
-		phantom.cookies = "";
+		phantom.clearCookies();
 		login();
 		send_fleet(origem, destino, speed, mission_type, ships)
 	}
@@ -339,7 +341,7 @@ function recycle_all() {
 
 function return_flight(id) {
 	casper.then(function() {
-		stderrLine('Returning flight ' + id.toString());
+		logger.writeLine('Returning flight ' + id.toString());
 		casper.thenOpen(base_url + 'page=movement&return=' + id.toString());
 	});
 }
@@ -409,7 +411,7 @@ function crawl_facilites(name) {
 	casper.thenOpen(base_url + 'page=station&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('div.station14 span.level', function() {
-			stderrLine('Facilities.');
+			logger.writeLine('Facilities.');
 
 			var values = this.evaluate(function() {
 				var return_dict = {};
@@ -436,7 +438,7 @@ function crawl_facilites(name) {
 				planet_values[key] = values[key];
 
 		}, function() {
-			stderrLine('Could not open facilities page for ' + name + '.')
+			logger.writeLine('Could not open facilities page for ' + name + '.')
 		});
 	});
 }
@@ -446,7 +448,7 @@ function crawl_resources(name) {
 	casper.thenOpen(base_url + 'page=resources&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('div.supply1 span.level', function() {
-			stderr(name + ': Resources; ');
+			logger.write(name + ': Resources; ');
 
 			var values = this.evaluate(function() {
 
@@ -489,14 +491,14 @@ function crawl_resources(name) {
 				planet_values[key] = values[key];
 
 		}, function() {
-			stderrLine('Could not open resources page for ' + name + '.')
+			logger.writeLine('Could not open resources page for ' + name + '.')
 		});
 	});
 
 	casper.thenOpen(base_url + 'page=resourceSettings&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('table.listOfResourceSettingsPerPlanet span.dropdown a', function() {
-			stderr('Settings; ');
+			logger.write('Settings; ');
 
 			var values = this.evaluate(function() {
 				var effic = document.querySelectorAll('table.listOfResourceSettingsPerPlanet span.dropdown a');
@@ -511,7 +513,7 @@ function crawl_resources(name) {
 				planet_values[key] = values[key];
 
 		}, function() {
-			stderrLine('Could not open resources settings for ' + name + '.')
+			logger.writeLine('Could not open resources settings for ' + name + '.')
 		});
 	});
 }
@@ -546,7 +548,7 @@ function crawl_research() {
 	casper.thenOpen(base_url + 'page=research', function() {
 
 		this.waitForSelector('div#inhalt div#planet', function() {
-			stderrLine('Research page opened.');
+			logger.writeLine('Research page opened.');
 
 			output_array['research'] = this.evaluate(function() {
 				var levels = {
@@ -576,7 +578,7 @@ function crawl_research() {
 				return return_dict;
 			});
 		}, function() {
-			stderrLine('Could not open research page.')
+			logger.writeLine('Could not open research page.')
 		});
 	});
 
@@ -591,7 +593,7 @@ function get_unread_messages() {
 		});
 		output_array['total_unread_messages'] = total_messages;
 	}, function() {
-		stderrLine('Could not find messages icon.')
+		logger.writeLine('Could not find messages icon.')
 	});
 }
 
@@ -602,7 +604,7 @@ function crawl_messages() {
 		this.open(base_url + 'page=messages');
 
 		this.waitForSelector('ul.pagination', function() {
-			stderrLine('Messages page open.');
+			logger.writeLine('Messages page open.');
 
 			values = this.evaluate(function() {
 
@@ -635,7 +637,7 @@ function crawl_messages() {
 			output_array['messages'] = values;
 
 		}, function() {
-			stderrLine('Could not open messages page.')
+			logger.writeLine('Could not open messages page.')
 		});
 	});
 
@@ -708,10 +710,9 @@ function parseCli() {
 
 	// Convert all arguments to string and lowercase
 	var args = [];
-	for (i = 0; i < system.args.length - 4; ++i) {
+	for (i = 0; i < casper.cli.args.length; ++i) {
 		args[i] = casper.cli.get(i).toString().toLowerCase();
 	}
-
 
 	if (args.length > 0) {
 		switch(args[0]) {
@@ -794,7 +795,10 @@ function parseCli() {
 	}
 }
 
-var casper = require('casper').create();
+var casper = require('casper').create({
+	verbose: true,
+	//logLevel: 'debug',
+});
 var utils = require('utils');
 var system = require('system');
 var fs = require('fs');
@@ -803,35 +807,45 @@ var fs = require('fs');
 var config_string = fs.read(config_file);
 var config = JSON.parse(config_string);
 
-var base_url = 'http://' + config['server'] + '/game/index.php?';
+var base_url = 'https://' + config['server'] + '/game/index.php?';
 
-casper.options.waitTimeout = 5000;
+var logger = new Logger("stderr.log");
+
+casper.options.waitTimeout = 2000;
 //casper.options.viewportSize = {width: 1280, height: 800};
 casper.userAgent("Mozilla/5.0 (X11; Linux x86_64; rv:48.0) Gecko/20100101 Firefox/48.0");
 casper.start("about:blank");
 
 casper.zoom(1);
 
-var data = fs.read(cookie_jar);
-phantom.cookies = JSON.parse(data);
+var data = JSON.parse(fs.read(cookie_jar));
+
+// When setting cookies, SlimerJS ignores expired ones
+// but we want to reuse the previous login
+data.forEach(function(e) {
+	e.expiry = 0;
+	e.expires = null;
+});
+
+phantom.cookies = data;
 
 casper.thenOpen(base_url);
-casper.then(function() {stderr('Page open: ');});
+casper.then(function() {logger.write('Page open: ');});
 logged_in = false;
 casper.waitForSelector('#detailWrapper', function() {
-	stderrLine('logged in.');
+	logger.writeLine('logged in.');
 	logged_in = true;
 	output_array['logged_in'] = true;
 }, function() {
-	stderr('not logged in; ');
+	logger.write('not logged in; ');
 	logged_in = false;
 	output_array['logged_in'] = false;
 },2000);
 
 casper.then(function() {
 	if(!logged_in) {
-		phantom.cookies = "";
-		login()
+		phantom.clearCookies();
+		login();
 	}
 });
 

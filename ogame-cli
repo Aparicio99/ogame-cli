@@ -7,4 +7,4 @@ if ! hash casperjs; then
 	exit
 fi
 
-casperjs --disk-cache=true ogame-cli.js "$@"
+casperjs --engine=slimerjs --headless --disk-cache=true ogame-cli.js "$@"
