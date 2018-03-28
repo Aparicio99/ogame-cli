@@ -3,6 +3,10 @@ var screenshot_dir = work_dir + '/screenshots/';
 var cookie_jar = work_dir + '/cookies.json';
 var player_data = work_dir + '/playerData.xml';
 var config_file = work_dir + '/config.json';
+var log_file = work_dir + '/stderr.log';
+
+// Block URLs matching this to avoid unnecessary page slowdowns
+var blocked_urls = [ 'ads-delivery', 'alexametrics' ];
 
 var place = {
   PLANET:  1,
@@ -87,54 +91,6 @@ class Logger {
 	}
 }
 
-function login() {
-	casper.waitForSelector('#loginBtn', function() {
-		logger.write('login page open; ');
-		output_array['logged_in'] = false;
-
-		this.click('#loginBtn');
-		this.fill('form#loginForm', {
-			'uni': config['server'],
-			'login': config['username'],
-			'pass': config['password'],
-		}, true);
-		this.waitForSelector('#detailWrapper', function() {
-			logger.writeLine('login done.');
-		}, function() {
-			logger.writeLine('derp.');
-			logger.writeLine('ERROR: Login messed up, exiting.');
-			this.capture(screenshot_dir + 'screenshot_derp.png');
-			this.exit();
-		});
-
-	}, function() {
-		logger.writeLine('could not find login button.');
-		current_mission = 0;
-	});
-}
-
-function open_fleet_movements() {
-	casper.thenOpen(base_url + 'page=movement');
-
-	casper.waitForSelector('div.fleetStatus span.fleetSlots', function() {
-		logger.writeLine('Fleet movements opened.');
-
-	}, function() {
-		logger.write('Could not open fleet movements; ')
-
-		if (this.exists('a#continue')) {
-			logger.writeLine('No movements at this moment.');
-
-		} else if (this.exists('#loginBtn')) {
-			logger.writeLine('Upsie, logged out.');
-			phantom.clearCookies();
-			login();
-			open_fleet_movements();
-		} else {
-			logger.writeLine('Still logged in but something went wrong.');
-		}
-	});
-}
 
 var takeoff = 0;
 
@@ -152,12 +108,14 @@ function verifyLogin(msg) {
 
 function select_ships(planned_mission, planet, ships) {
 
-	casper.thenOpen(base_url + 'page=fleet1&cp=' + planets[planet]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=fleet1&cp=' + planets[planet]['id'].toString(), function() {
+
+		logger.write(planet + ': ');
 
 		current_mission = planned_mission;
 
 		this.waitForSelector('div.fleetStatus div#slots', function() {
-			logger.write(planet + ': fleet ');
+			logger.write('fleet ');
 
 			if (this.exists('a#continue')) {
 
@@ -261,7 +219,7 @@ function send_mission(planned_mission, type, resources) {
 }
 
 function return_fleet(id) {
-	casper.thenOpen(base_url + 'page=movement&return=' + id.toString());
+	casper.thenOpen(ogame.base_url + 'page=movement&return=' + id.toString());
 }
 
 var mission_counter = 0;
@@ -272,8 +230,7 @@ function send_fleet(origem, destino, speed, mission_type, ships) {
 	mission_counter++;
 
 	recovery = function() {
-		phantom.clearCookies();
-		login();
+		ogame.login();
 		send_fleet(origem, destino, speed, mission_type, ships)
 	}
 
@@ -295,18 +252,15 @@ function reciclar(origem, destino, speed) {
 function transportar(origem, destino, speed) {
 
 	if (! planets[origem]) {
-		casper.echo('Error: Invalid source');
-		casper.exit();
+		ogame.abort('Error: Invalid source');
 	}
 
 	if (! planets[destino]) {
-		casper.echo('Error: Invalid destination "' + destino + '"');
-		casper.exit();
+		ogame.abort('Error: Invalid destination "' + destino + '"');
 	}
 
 	if (destino === 'all') {
-		casper.echo('Error: Destiny can\'t be all for transport');
-		casper.exit();
+		ogame.abort('Error: Destiny can\'t be all for transport');
 	}
 
 	if (origem === 'all')
@@ -342,73 +296,57 @@ function recycle_all() {
 function return_flight(id) {
 	casper.then(function() {
 		logger.writeLine('Returning flight ' + id.toString());
-		casper.thenOpen(base_url + 'page=movement&return=' + id.toString());
+		casper.thenOpen(ogame.base_url + 'page=movement&return=' + id.toString());
 	});
 }
 
-function list_flights() {
-	open_fleet_movements();
+function parse_fleet_movements() {
+	flights = document.querySelectorAll('.fleetDetails');
+	values = [];
+	for (var f = 0; f < flights.length; ++f) {
+		var fleet_id      = parseInt(flights[f].getAttribute('id').slice(5));
+		var mission_type  = parseInt(flights[f].getAttribute('data-mission-type'));
+		var arrival       = parseInt(flights[f].getAttribute('data-arrival-time'));
+		var return_flight = flights[f].getAttribute('data-return-flight') === 'true';
 
-	casper.then(function() {
+		var origin = flights[f].querySelector('span.originPlanet').textContent.trim();
+		var destination = flights[f].querySelector('span.destinationPlanet span').textContent.trim();
 
-		values = this.evaluate(function() {
-			flights = document.querySelectorAll('.fleetDetails');
-			values = [];
-			for (var f = 0; f < flights.length; ++f) {
-				var fleet_id      = parseInt(flights[f].getAttribute('id').slice(5));
-				var mission_type  = parseInt(flights[f].getAttribute('data-mission-type'));
-				var arrival       = parseInt(flights[f].getAttribute('data-arrival-time'));
-				var return_flight = flights[f].getAttribute('data-return-flight') === 'true';
+		if (return_flight)
+			takeoff = flights[f].querySelector('span.starStreak div div.destination.fixed img.tooltipHTML').title;
+		else
+			takeoff = flights[f].querySelector('span.starStreak div div.origin.fixed img.tooltipHTML').title;
 
-				var origin = flights[f].querySelector('span.originPlanet').textContent.trim();
-				var destination = flights[f].querySelector('span.destinationPlanet span').textContent.trim();
+		var re = /Começo:\| (\d\d).(\d\d).(\d\d\d\d)<br>(\d\d).(\d\d).(\d\d)/;
+		var m  = takeoff.match(re);
+		takeoff = m[3]+'-'+m[2]+'-'+m[1]+' '+m[4]+':'+m[5]+':'+m[6];
 
-				if (return_flight)
-					takeoff = flights[f].querySelector('span.starStreak div div.destination.fixed img.tooltipHTML').title;
-				else
-					takeoff = flights[f].querySelector('span.starStreak div div.origin.fixed img.tooltipHTML').title;
+		var details = flights[f].querySelector('span.starStreak div.route div.htmlTooltip table.fleetinfo').textContent.replace(/\./g, '');
 
-				var re = /Começo:\| (\d\d).(\d\d).(\d\d\d\d)<br>(\d\d).(\d\d).(\d\d)/;
-				var m  = takeoff.match(re);
-				takeoff = m[3]+'-'+m[2]+'-'+m[1]+' '+m[4]+':'+m[5]+':'+m[6];
+		var re = /Metal:\s+(\d+)\s+Cristal:\s+(\d+)\s+Deutério:\s+(\d+)/;
+		var m  = details.match(re);
+		var metal     = parseInt(m[1]);
+		var crystal   = parseInt(m[2]);
+		var deuterium = parseInt(m[3]);
 
-				var details = flights[f].querySelector('span.starStreak div.route div.htmlTooltip table.fleetinfo').textContent.replace(/\./g, '');
-
-				var re = /Metal:\s+(\d+)\s+Cristal:\s+(\d+)\s+Deutério:\s+(\d+)/;
-				var m  = details.match(re);
-				var metal     = parseInt(m[1]);
-				var crystal   = parseInt(m[2]);
-				var deuterium = parseInt(m[3]);
-
-				values.push({'id': fleet_id,
-				             'type': mission_type,
-				             'takeoff': takeoff,
-				             'arrival': arrival,
-				             'origin': origin,
-				             'destination': destination,
-				             'return': return_flight,
-				             'metal': metal,
-				             'crystal': crystal,
-				             'deuterium': deuterium,
-				});
-			};
-			return values;
+		values.push({'id': fleet_id,
+					 'type': mission_type,
+					 'takeoff': takeoff,
+					 'arrival': arrival,
+					 'origin': origin,
+					 'destination': destination,
+					 'return': return_flight,
+					 'metal': metal,
+					 'crystal': crystal,
+					 'deuterium': deuterium,
 		});
-		values = values.map(function(obj) {
-			var t = new Date(obj['arrival'] * 1000);
-			obj['arrival'] = format_date(t);
-			return obj;
-		});
-
-		output_array['flights'] = values;
-	});
-
-	screenshot('flights.png');
+	};
+	return values;
 }
 
 function crawl_facilites(name) {
 
-	casper.thenOpen(base_url + 'page=station&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=station&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('div.station14 span.level', function() {
 			logger.writeLine('Facilities.');
@@ -445,7 +383,7 @@ function crawl_facilites(name) {
 
 function crawl_resources(name) {
 
-	casper.thenOpen(base_url + 'page=resources&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=resources&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('div.supply1 span.level', function() {
 			logger.write(name + ': Resources; ');
@@ -495,7 +433,7 @@ function crawl_resources(name) {
 		});
 	});
 
-	casper.thenOpen(base_url + 'page=resourceSettings&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=resourceSettings&cp=' + planets[name]['id'].toString(), function() {
 
 		this.waitForSelector('table.listOfResourceSettingsPerPlanet span.dropdown a', function() {
 			logger.write('Settings; ');
@@ -533,24 +471,24 @@ function crawl_planet(name) {
 	crawl_facilites(name);
 
 	casper.then(function() {
-		output_array['resources'].push(planet_values);
+		ogame.output_array['resources'].push(planet_values);
 	});
 }
 
 function crawl_planets() {
-	output_array['resources'] = [];
+	ogame.output_array['resources'] = [];
 	for (planet in planets)
 		crawl_planet(planet);
 }
 
 function crawl_research() {
 
-	casper.thenOpen(base_url + 'page=research', function() {
+	casper.thenOpen(ogame.base_url + 'page=research', function() {
 
 		this.waitForSelector('div#inhalt div#planet', function() {
 			logger.writeLine('Research page opened.');
 
-			output_array['research'] = this.evaluate(function() {
+			var result = this.evaluate(function() {
 				var levels = {
 					'espionage_tech':   'details106',
 					'computer_tech':    'details108',
@@ -577,6 +515,8 @@ function crawl_research() {
 				}
 				return return_dict;
 			});
+
+			ogame.result('research', result);
 		}, function() {
 			logger.writeLine('Could not open research page.')
 		});
@@ -585,23 +525,11 @@ function crawl_research() {
 	screenshot_area('research.png', {top:431, left:235, width: 670, height: 400});
 }
 
-function get_unread_messages() {
-
-	casper.waitForSelector('span.new_msg_count.totalMessages.news', function() {
-		total_messages = this.evaluate(function() {
-			return parseInt(document.querySelector('span.new_msg_count.totalMessages.news').getAttribute('data-new-messages'));
-		});
-		output_array['total_unread_messages'] = total_messages;
-	}, function() {
-		logger.writeLine('Could not find messages icon.')
-	});
-}
-
 function crawl_messages() {
 
 	casper.then(function() {
 
-		this.open(base_url + 'page=messages');
+		this.open(ogame.base_url + 'page=messages');
 
 		this.waitForSelector('ul.pagination', function() {
 			logger.writeLine('Messages page open.');
@@ -634,7 +562,7 @@ function crawl_messages() {
 				};
 			});
 
-			output_array['messages'] = values;
+			ogame.result('messages', values);
 
 		}, function() {
 			logger.writeLine('Could not open messages page.')
@@ -673,7 +601,6 @@ function get_bodies_list() {
 			planets[name] = {'id': id, 'galaxy': galaxy, 'system': system, 'pos': position, 'type': place.MOON};
 		}
 	}
-
 	return planets
 }
 
@@ -692,14 +619,13 @@ function get_info(query) {
 			crawl_planets();
 			break
 		case 'all':
-			list_flights();
+			ogame.list_flights();
 			crawl_research();
 			crawl_planets();
 			crawl_messages();
 			break;
 	}
 }
-
 
 function usage() {
 	casper.echo('Usage: casperjs ogame.js (collect_all|recycle_all|fleetsave|transfer|transport|return|list) [options]');
@@ -782,16 +708,192 @@ function parseCli() {
 
 		screenshot('last.png')
 
-		list_flights();
+		ogame.list_flights();
 
-		get_unread_messages();
+		ogame.get_unread_messages();
 
-		casper.then(function() {
-			this.echo(JSON.stringify(output_array, undefined, 2));
-		});
+		casper.then(ogame.dump_results);
 
 	} else {
 		usage();
+	}
+}
+
+class Cookies {
+	constructor(filename) {
+		this.file = filename;
+		this.load();
+	}
+
+	load() {
+		var data = JSON.parse(fs.read(this.file));
+
+		// When setting cookies, SlimerJS ignores expired ones
+		// but we want to reuse the previous login
+		data.forEach(function(e) {
+			e.expiry = 0;
+			e.expires = null;
+		});
+
+		phantom.cookies = data;
+	}
+
+	save() {
+		var cookies = JSON.stringify(phantom.cookies);
+		fs.write(this.file, cookies, 644);
+	}
+
+	clear() {
+		phantom.clearCookies();
+	}
+}
+
+class Ogame {
+
+	constructor(config_file) {
+
+		var config = JSON.parse(fs.read(config_file));
+		this.server   = config['server'];
+		this.username = config['username'];
+		this.password = config['password'];
+
+		this.base_url = 'https://' + this.server + '/game/index.php?';
+
+		this.output_array = {
+			'version': 2,
+			'logged_in': false,
+			'success': true,
+		};
+
+		casper.options.waitTimeout = 5000;
+		casper.options.viewportSize = {width: 1280, height: 900};
+		casper.userAgent("Mozilla/5.0 (X11; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0");
+
+		casper.on('resource.requested', function(data, request) {
+			blocked_urls.forEach(function(name){
+				if (data.url.indexOf(name) != -1) {
+					//logger.write("Aborting request to " + data.url)
+					request.abort();
+				}
+			});
+			//console.log("Request to " + data.url)
+		});
+
+		this.open();
+	}
+
+	open() {
+		casper.start(this.base_url, function() {
+			logger.write('Page open: ');
+		});
+
+		casper.waitForSelector('#detailWrapper', function() {
+			logger.writeLine('logged in.');
+			ogame.result('logged_in', true);
+
+		}, function() {
+			logger.write('not logged in; ');
+			ogame.result('logged_in', false);
+			ogame.login();
+		}, 2000);
+	}
+
+	login() {
+		var server = this.server;
+		var username = this.username;
+		var password = this.password;
+
+		casper.waitForSelector('#loginBtn', function() {
+
+			logger.write('login page open; ');
+			ogame.result('logged_in', false);
+
+			this.click('#loginBtn');
+			this.fill('form#loginForm', {
+				'uni': server,
+				'login': username,
+				'pass': password,
+			}, true);
+
+			this.waitForSelector('#detailWrapper', function() {
+				logger.writeLine('login done.');
+				cookies.save();
+
+			}, function() {
+				this.capture(screenshot_dir + 'screenshot_derp.png');
+				ogame.abort('ERROR: Login messed up, exiting.');
+			});
+
+		}, function() {
+			ogame.abort('could not find login button.');
+		}, 5000);
+	}
+
+	result(name, value) {
+		this.output_array[name] = value;
+	}
+
+	dump_results() {
+		casper.echo(JSON.stringify(ogame.output_array, undefined, 2));
+	}
+
+	abort(reason) {
+		screenshot('abort.png');
+		this.result('success', false);
+		this.dump_results();
+		logger.writeLine(reason);
+		casper.exit();
+	}
+
+	list_flights() {
+		var flights_selector = 'div.fleetStatus span.fleetSlots';
+
+		casper.then(function() {
+			if (!casper.visible(flights_selector))
+				casper.open(ogame.base_url + 'page=movement');
+		});
+
+		casper.waitForSelector(flights_selector, function() {
+			logger.writeLine('Fleet movements opened.');
+
+		}, function() {
+			logger.write('Could not open fleet movements; ')
+
+			if (casper.exists('a#continue')) {
+				logger.writeLine('No movements at this moment.');
+
+			} else if (casper.exists('#loginBtn')) {
+				ogame.abort('Upsie, logged out.');
+
+			} else {
+				ogame.abort('Still logged in but something went wrong.');
+			}
+		}, 2000);
+
+		casper.then(function() {
+			var values = casper.evaluate(parse_fleet_movements);
+			values = values.map(function(obj) {
+				var t = new Date(obj['arrival'] * 1000);
+				obj['arrival'] = format_date(t);
+				return obj;
+			});
+			ogame.result('flights', values);
+		});
+
+		screenshot('flights.png');
+	}
+
+	get_unread_messages() {
+		casper.then(function() {
+			if(casper.exists('span.new_msg_count.totalMessages.news')) {
+				var total_messages = this.evaluate(function() {
+					return parseInt(document.querySelector('span.new_msg_count.totalMessages.news').getAttribute('data-new-messages'));
+				});
+				ogame.result('total_unread_messages', total_messages);
+			} else {
+				logger.writeLine('Could not find messages icon.')
+			}
+		});
 	}
 }
 
@@ -803,59 +905,15 @@ var utils = require('utils');
 var system = require('system');
 var fs = require('fs');
 
-// Read config file
-var config_string = fs.read(config_file);
-var config = JSON.parse(config_string);
+var logger = new Logger(log_file);
 
-var base_url = 'https://' + config['server'] + '/game/index.php?';
+var cookies = new Cookies(cookie_jar);
 
-var logger = new Logger("stderr.log");
-
-casper.options.waitTimeout = 2000;
-//casper.options.viewportSize = {width: 1280, height: 800};
-casper.userAgent("Mozilla/5.0 (X11; Linux x86_64; rv:48.0) Gecko/20100101 Firefox/48.0");
-casper.start("about:blank");
-
-casper.zoom(1);
-
-var data = JSON.parse(fs.read(cookie_jar));
-
-// When setting cookies, SlimerJS ignores expired ones
-// but we want to reuse the previous login
-data.forEach(function(e) {
-	e.expiry = 0;
-	e.expires = null;
-});
-
-phantom.cookies = data;
-
-casper.thenOpen(base_url);
-casper.then(function() {logger.write('Page open: ');});
-logged_in = false;
-casper.waitForSelector('#detailWrapper', function() {
-	logger.writeLine('logged in.');
-	logged_in = true;
-	output_array['logged_in'] = true;
-}, function() {
-	logger.write('not logged in; ');
-	logged_in = false;
-	output_array['logged_in'] = false;
-},2000);
-
-casper.then(function() {
-	if(!logged_in) {
-		phantom.clearCookies();
-		login();
-	}
-});
-
-casper.then(function() {
-	var cookies = JSON.stringify(phantom.cookies);
-	fs.write(cookie_jar, cookies, 644);
-});
+var ogame = new Ogame(config_file);
 
 var planets = get_bodies_list();
-var output_array = {version: 2};
 
 parseCli();
 casper.run();
+
+// vim: ts=4:sw=4
