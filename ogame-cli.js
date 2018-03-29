@@ -1,7 +1,6 @@
 var work_dir = './';
 var screenshot_dir = work_dir + '/screenshots/';
 var cookie_jar = work_dir + '/cookies.json';
-var player_data = work_dir + '/playerData.xml';
 var config_file = work_dir + '/config.json';
 var log_file = work_dir + '/stderr.log';
 
@@ -93,7 +92,7 @@ class Logger {
 
 function select_ships(planet, ships) {
 
-	casper.thenOpen(ogame.base_url + 'page=fleet1&cp=' + planets[planet]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=fleet1&cp=' + ogame.planet(planet).id.toString(), function() {
 
 		logger.write(planet + ': ');
 
@@ -202,18 +201,19 @@ function send_fleet(origem, destino, speed, mission_type, ships) {
 		send_mission(mission_type, [ore.DEUTERIUM, ore.CRYSTAL, ore.METAL]);
 }
 
-function reciclar(origem, destino, speed) {
-	var destination = { 'id': planets[destino]['id'], 'system': planets[destino]['system'], 'pos':  planets[destino]['pos'], 'type': place.DEBRIS };
+function reciclar(origem, dest_name, speed) {
+	var dest_planet = ogame.planet(dest_name);
+	var destination = { 'id': dest_planet.id, 'system': dest_planet.system, 'pos':  dest_planet.pos, 'type': place.DEBRIS };
 	send_fleet(origem, destination, speed, mission.RECYCLE, ship.RECYCLER)
 }
 
 function transportar(origem, destino, speed) {
 
-	if (! planets[origem]) {
+	if (! ogame.planet(origem)) {
 		ogame.abort('Error: Invalid source');
 	}
 
-	if (! planets[destino]) {
+	if (! ogame.planet(destino)) {
 		ogame.abort('Error: Invalid destination "' + destino + '"');
 	}
 
@@ -224,29 +224,29 @@ function transportar(origem, destino, speed) {
 	if (origem === 'all')
 		collect_all(destino)
 	else
-		send_fleet(origem, planets[destino], speed, mission.TRANSPORT, ship.SMALL_CARGO | ship.LARGE_CARGO)
+		send_fleet(origem, ogame.planet(destino), speed, mission.TRANSPORT, ship.SMALL_CARGO | ship.LARGE_CARGO)
 }
 
-function transferir(origem, destino, speed) {
-	send_fleet(origem, planets[destino], speed, mission.TRANSFER, ship.SMALL_CARGO | ship.LARGE_CARGO | ship.DEATHSTAR)
+function transferir(origem, dest_name, speed) {
+	send_fleet(origem, ogame.planet(dest_name), speed, mission.TRANSFER, ship.SMALL_CARGO | ship.LARGE_CARGO | ship.DEATHSTAR)
 }
 
 function explorar(origem, speed) {
-	destination = { 'id': 0, 'system': planets[origem]['system'], 'pos':  16, 'type': place.PLANET };
+	var destination = { 'id': 0, 'system': ogame.planet(origem),system, 'pos':  16, 'type': place.PLANET };
 	send_fleet(origem, destination, speed, mission.EXPLORATION, ship.LARGE_CARGO | ship.DEATHSTAR)
 }
 
 function collect_all(destino) {
-	for (planet in planets) {
-		if (planet !== destino && planets[planet]['type'] === place.PLANET)
-		    transportar(planet, destino, 100)
+	for (name in ogame.planets) {
+		if (planet !== destino && ogame.planet(name).type === place.PLANET)
+		    transportar(name, destino, 100)
 	}
 }
 
 function recycle_all() {
-	for (planet in planets) {
-		if (planets[planet]['type'] == place.PLANET) {
-			reciclar(planet, planet, 100)
+	for (name in ogame.planets) {
+		if (ogame.planet(name).type == place.PLANET) {
+			reciclar(name, name, 100)
 		}
 	}
 }
@@ -303,9 +303,9 @@ function parse_fleet_movements() {
 	return values;
 }
 
-function crawl_facilites(name) {
+function crawl_facilites(planet) {
 
-	casper.thenOpen(ogame.base_url + 'page=station&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=station&cp=' + planet.id.toString(), function() {
 
 		this.waitForSelector('div.station14 span.level', function() {
 			logger.writeLine('Facilities.');
@@ -335,17 +335,17 @@ function crawl_facilites(name) {
 				planet_values[key] = values[key];
 
 		}, function() {
-			logger.writeLine('Could not open facilities page for ' + name + '.')
+			ogame.abort('Could not open facilities page for ' + planet.name + '.')
 		});
 	});
 }
 
-function crawl_resources(name) {
+function crawl_resources(planet) {
 
-	casper.thenOpen(ogame.base_url + 'page=resources&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=resources&cp=' + planet.id.toString(), function() {
 
 		this.waitForSelector('div.supply1 span.level', function() {
-			logger.write(name + ': Resources; ');
+			logger.write(planet.name + ': Resources; ');
 
 			var values = this.evaluate(function() {
 
@@ -388,11 +388,11 @@ function crawl_resources(name) {
 				planet_values[key] = values[key];
 
 		}, function() {
-			logger.writeLine('Could not open resources page for ' + name + '.')
+			ogame.abort('Could not open resources page for ' + planet.name + '.')
 		});
 	});
 
-	casper.thenOpen(ogame.base_url + 'page=resourceSettings&cp=' + planets[name]['id'].toString(), function() {
+	casper.thenOpen(ogame.base_url + 'page=resourceSettings&cp=' + planet.id.toString(), function() {
 
 		this.waitForSelector('table.listOfResourceSettingsPerPlanet span.dropdown a', function() {
 			logger.write('Settings; ');
@@ -402,32 +402,32 @@ function crawl_resources(name) {
 
 				return {
 					'metal_effic':     parseInt(effic[0].getAttribute("data-value")),
-			                'crystal_effic':   parseInt(effic[1].getAttribute("data-value")),
-			                'deuterium_effic': parseInt(effic[2].getAttribute("data-value")),
+					'crystal_effic':   parseInt(effic[1].getAttribute("data-value")),
+					'deuterium_effic': parseInt(effic[2].getAttribute("data-value")),
 				};
 			});
 			for (key in values)
 				planet_values[key] = values[key];
 
 		}, function() {
-			logger.writeLine('Could not open resources settings for ' + name + '.')
+			ogame.abort('Could not open resources settings for ' + planet.name + '.')
 		});
 	});
 }
 
-function crawl_planet(name) {
+function crawl_planet(planet) {
 	casper.then(function() {
-		planet_values = {'name': name, 'type': 'planet', 'coords': planets[name]['coords']};
+		planet_values = {'name': planet.name, 'type': 'planet', 'coords': planet.coords};
 
-		if (planets[name]['type'] === place.PLANET)
+		if (planet.type === place.PLANET)
 			planet_values['type'] = 'planet';
 
-		else if (planets[name]['type'] === place.MOON)
+		else if (planet.type === place.MOON)
 			planet_values['type'] = 'moon';
 	});
 
-	crawl_resources(name);
-	crawl_facilites(name);
+	crawl_resources(planet);
+	crawl_facilites(planet);
 
 	casper.then(function() {
 		ogame.output_array['resources'].push(planet_values);
@@ -436,8 +436,10 @@ function crawl_planet(name) {
 
 function crawl_planets() {
 	ogame.output_array['resources'] = [];
-	for (planet in planets)
+	for (name in ogame.planets) {
+		var planet = ogame.planet(name)
 		crawl_planet(planet);
+	}
 }
 
 function crawl_research() {
@@ -477,7 +479,7 @@ function crawl_research() {
 
 			ogame.result('research', result);
 		}, function() {
-			logger.writeLine('Could not open research page.')
+			ogame.abort('Could not open research page.')
 		});
 	});
 
@@ -486,9 +488,7 @@ function crawl_research() {
 
 function crawl_messages() {
 
-	casper.then(function() {
-
-		this.open(ogame.base_url + 'page=messages');
+	casper.thenOpen(ogame.base_url + 'page=messages', function() {
 
 		this.waitForSelector('ul.pagination', function() {
 			logger.writeLine('Messages page open.');
@@ -524,43 +524,11 @@ function crawl_messages() {
 			ogame.result('messages', values);
 
 		}, function() {
-			logger.writeLine('Could not open messages page.')
+			ogame.abort('Could not open messages page.')
 		});
 	});
 
 	screenshot_area('messages.png', {top:210, left:235, width: 680, height: 300});
-}
-
-function get_bodies_list() {
-
-	var planets = {}
-
-	var data = fs.read(player_data);
-	parser = new DOMParser();
-	xmldoc = parser.parseFromString(data, 'text/xml');
-
-	planet_nodes = xmldoc.getElementsByTagName('planets')[0].childNodes;
-
-	for (i = 0; i < planet_nodes.length; i++) {
-		var name = planet_nodes[i].getAttribute('name').toLowerCase();
-		var id = parseInt(planet_nodes[i].getAttribute('id'));
-		var coords = planet_nodes[i].getAttribute('coords');
-		var re = /(\d+):(\d+):(\d+)/;
-		var m  = coords.match(re);
-		var galaxy   = parseInt(m[1]);
-		var system   = parseInt(m[2]);
-		var position = parseInt(m[3]);
-		planets[name] = {'id': id, 'coords': coords, 'galaxy': galaxy, 'system': system, 'pos': position, 'type': place.PLANET};
-
-		moon_nodes = planet_nodes[i].getElementsByTagName('moon');
-
-		if (moon_nodes.length == 1) {
-			var name = moon_nodes[0].getAttribute('name').toLowerCase();
-			var id = parseInt(moon_nodes[0].getAttribute('id'));
-			planets[name] = {'id': id, 'galaxy': galaxy, 'system': system, 'pos': position, 'type': place.MOON};
-		}
-	}
-	return planets
 }
 
 function get_info(query) {
@@ -576,6 +544,9 @@ function get_info(query) {
 			break;
 		case 'resources':
 			crawl_planets();
+			break
+		case 'planets':
+			list_planets();
 			break
 		case 'all':
 			ogame.list_flights();
@@ -712,9 +683,9 @@ class Ogame {
 	constructor(config_file) {
 
 		var config = JSON.parse(fs.read(config_file));
-		this.server   = config['server'];
-		this.username = config['username'];
-		this.password = config['password'];
+		this.server   = config.server;
+		this.username = config.username;
+		this.password = config.password;
 
 		this.base_url = 'https://' + this.server + '/game/index.php?';
 
@@ -723,6 +694,8 @@ class Ogame {
 			'logged_in': false,
 			'success': true,
 		};
+
+		this.planets = {};
 
 		casper.options.waitTimeout = 5000;
 		casper.options.viewportSize = {width: 1280, height: 900};
@@ -739,6 +712,7 @@ class Ogame {
 		});
 
 		this.open();
+		this.crawl_planet_list();
 	}
 
 	open() {
@@ -804,6 +778,10 @@ class Ogame {
 		casper.exit();
 	}
 
+	planet(name) {
+		return this.planets[name];
+	}
+
 	list_flights() {
 		var flights_selector = 'div.fleetStatus span.fleetSlots';
 
@@ -853,6 +831,61 @@ class Ogame {
 			}
 		});
 	}
+
+	crawl_planet_list() {
+		casper.waitForSelector('div#planetList', function() {
+			logger.write('Collecting planets info; ')
+
+			var result = this.evaluate(function() {
+				var return_dict = {};
+				var planets = document.querySelectorAll('div#planetList div');
+				planets.forEach(function(elem) {
+
+					var name = elem.querySelector('span.planet-name').textContent.toLowerCase();
+
+					var coords = elem.querySelector('span.planet-koords').textContent.match(/(\d+):(\d+):(\d+)/);
+					var galaxy = parseInt(coords[1]);
+					var system = parseInt(coords[2]);
+					var pos    = parseInt(coords[3]);
+
+					return_dict[name] = {
+						name:	name,
+						type:   1, // Planet
+						id:     parseInt(elem.id.match(/planet-(\d+)/)[1]),
+						coords: coords[0],
+						galaxy: galaxy,
+						system: system,
+						pos:    pos,
+					};
+
+					var moon = elem.querySelector('a.moonlink');
+					if (moon) {
+						var name = moon.querySelector('img').alt.toLowerCase();
+						return_dict[name] = {
+							name:	name,
+							type:   3, // Moon
+							id:     parseInt(moon.href.match(/(\d+)$/)[1]),
+							coords: coords[0],
+							galaxy: galaxy,
+							system: system,
+							pos:    pos,
+						};
+					}
+				});
+				return return_dict;
+			});
+
+			//ogame.result('planets', result);
+			ogame.planets = result;
+			logger.writeLine('Saved.')
+		}, function() {
+			ogame.abort('Could not find planet list.')
+		});
+	}
+
+	list_planets() { // Useful for debugging
+		this.output_array['planets'] = this.planets;
+	}
 }
 
 var casper = require('casper').create({
@@ -869,9 +902,13 @@ var cookies = new Cookies(cookie_jar);
 
 var ogame = new Ogame(config_file);
 
-var planets = get_bodies_list();
+// Run one time to login and collect planets data
+casper.run(function() {
+	// And only after that run the action requested from the cli
+	// This way the second run can use the planet data collected before
+	parseCli();
+	casper.run();
+});
 
-parseCli();
-casper.run();
 
 // vim: ts=4:sw=4
