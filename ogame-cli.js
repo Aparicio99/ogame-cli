@@ -91,28 +91,11 @@ class Logger {
 	}
 }
 
-
-var takeoff = 0;
-
-function verifyLogin(msg) {
-	logger.write(msg + '; ')
-	if (casper.exists('#loginBtn')) {
-		logger.writeLine('Upsie, logged out.');
-		recovery();
-	} else {
-		logger.writeLine('Still logged in but something went wrong.');
-		current_mission = 0;
-	}
-	screenshot('screenshot1.png')
-}
-
-function select_ships(planned_mission, planet, ships) {
+function select_ships(planet, ships) {
 
 	casper.thenOpen(ogame.base_url + 'page=fleet1&cp=' + planets[planet]['id'].toString(), function() {
 
 		logger.write(planet + ': ');
-
-		current_mission = planned_mission;
 
 		this.waitForSelector('div.fleetStatus div#slots', function() {
 			logger.write('fleet ');
@@ -132,89 +115,74 @@ function select_ships(planned_mission, planet, ships) {
 			}
 
 			logger.writeLine('WARNING: No fleet available to send on ' + planet);
-			current_mission = 0;
 
 		}, function() {
-			verifyLogin('Could not open fleet page')
+			ogame.abort('Could not open fleet page')
 		});
 	});
 }
 
-function select_destination(planned_mission, system, position, type, speed) {
-	casper.then(function() {
-		if (current_mission != planned_mission)
-			return;
-		this.waitForSelector('form[name="details"]', function then() {
-			logger.write('destination ');
-			this.fill('form[name="details"]', {
-				'type': String(type),
-				'speed': String(speed/10),
-				'system': String(system),
-				'position': String(position),
-			}, true);
-			logger.write('selected; ');
+function select_destination(system, position, type, speed) {
+	casper.waitForSelector('form[name="details"]', function then() {
+		logger.write('destination ');
+		this.fill('form[name="details"]', {
+			'type': String(type),
+			'speed': String(speed/10),
+			'system': String(system),
+			'position': String(position),
+		}, true);
+		logger.write('selected; ');
 
-		}, function timeout() {
-			verifyLogin('Could not continue to destination page');
-		});
+	}, function timeout() {
+		ogame.abort('Could not continue to destination page');
 	});
 }
 
-function send_mission(planned_mission, type, resources) {
-	casper.then(function() {
-		if (current_mission != planned_mission)
-			return;
-		this.waitForSelector('a#start', function then() {
-			logger.write('mission ');
-			screenshot('bug.png');
+function send_mission(type, resources) {
+	casper.waitForSelector('a#start', function() {
+		logger.write('mission ');
 
-			if (type === mission.TRANSPORT)
-				this.click('#missionButton3');
-			else if (type === mission.TRANSFER)
-				this.click('#missionButton4');
-			else if (type === mission.RECYCLE)
-				this.click('#missionButton8');
-			else if (type === mission.EXPLORATION)
-				this.click('#missionButton15');
+		if (type === mission.TRANSPORT)
+			this.click('#missionButton3');
+		else if (type === mission.TRANSFER)
+			this.click('#missionButton4');
+		else if (type === mission.RECYCLE)
+			this.click('#missionButton8');
+		else if (type === mission.EXPLORATION)
+			this.click('#missionButton15');
 
-			for (i = 0; i < resources.length; ++i) {
-				if (resources[i] === ore.METAL)
-					this.evaluate(function() {maxMetal();});
-				else if (resources[i] === ore.CRYSTAL)
-					this.evaluate(function() {maxCrystal();});
-				else if (resources[i] === ore.DEUTERIUM)
-					this.evaluate(function() {maxDeuterium();});
-			}
-			this.evaluate(function() {updateVariables();});
+		for (i = 0; i < resources.length; ++i) {
+			if (resources[i] === ore.METAL)
+				this.evaluate(function() {maxMetal();});
+			else if (resources[i] === ore.CRYSTAL)
+				this.evaluate(function() {maxCrystal();});
+			else if (resources[i] === ore.DEUTERIUM)
+				this.evaluate(function() {maxDeuterium();});
+		}
+		this.evaluate(function() {updateVariables();}); // This is a function from the ogame JS
 
-			if (this.exists('a#start.on')) {
-				this.thenClick('a#start');
-				logger.write('selected; ')
-			} else {
-				logger.writeLine('WARNING: Could not send fleet for some reason.')
-				current_mission = 0;
-			}
+		if (this.exists('a#start.on')) {
+			this.thenClick('a#start');
+			logger.write('selected; ')
+		} else {
+			logger.writeLine('WARNING: Could not send fleet for some reason.')
+		}
 
-		}, function timeout() {
-			verifyLogin('Could not load mission page')
-		});
+	}, function() {
+		ogame.abort('Could not load mission page')
 	});
 
-	casper.then(function() {
-		if (current_mission != planned_mission)
-			return;
-		this.waitForSelector('div.fleetStatus div#slots', function then() {
-			logger.writeLine('on route.');
+	casper.waitForSelector('div.fleetStatus div#slots', function then() {
+		logger.writeLine('on route.');
 
-		}, function timeout() {
-			logger.write('Could not submit mission; ')
+	}, function() {
+		logger.write('Could not submit mission; ')
 
-			if (this.exists('#loginBtn')) {
-				logger.writeLine('Upsie, logged out, Fleet probably not on route.');
-			} else {
-				logger.writeLine('Still logged in but something went wrong, fleet probably not on route.');
-			}
-		});
+		if (this.exists('#loginBtn')) {
+			ogame.abort('Upsie, logged out, fleet probably not on route.');
+		} else {
+			ogame.abort('Still logged in but something went wrong, fleet probably not on route.');
+		}
 	});
 }
 
@@ -222,26 +190,16 @@ function return_fleet(id) {
 	casper.thenOpen(ogame.base_url + 'page=movement&return=' + id.toString());
 }
 
-var mission_counter = 0;
-var current_mission = 0;
-
 function send_fleet(origem, destino, speed, mission_type, ships) {
 
-	mission_counter++;
+	select_ships(origem, ships);
 
-	recovery = function() {
-		ogame.login();
-		send_fleet(origem, destino, speed, mission_type, ships)
-	}
-
-	select_ships(mission_counter, origem, ships);
-
-	select_destination(mission_counter, destino['system'], destino['pos'], destino['type'], speed)
+	select_destination(destino['system'], destino['pos'], destino['type'], speed)
 
 	if (mission_type == mission.RECYCLE)
-		send_mission(mission_counter, mission_type, []);
+		send_mission(mission_type, []);
 	else
-		send_mission(mission_counter, mission_type, [ore.DEUTERIUM, ore.CRYSTAL, ore.METAL]);
+		send_mission(mission_type, [ore.DEUTERIUM, ore.CRYSTAL, ore.METAL]);
 }
 
 function reciclar(origem, destino, speed) {
@@ -312,6 +270,7 @@ function parse_fleet_movements() {
 		var origin = flights[f].querySelector('span.originPlanet').textContent.trim();
 		var destination = flights[f].querySelector('span.destinationPlanet span').textContent.trim();
 
+		var takeoff;
 		if (return_flight)
 			takeoff = flights[f].querySelector('span.starStreak div div.destination.fixed img.tooltipHTML').title;
 		else
@@ -879,7 +838,6 @@ class Ogame {
 			});
 			ogame.result('flights', values);
 		});
-
 		screenshot('flights.png');
 	}
 
