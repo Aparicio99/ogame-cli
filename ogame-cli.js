@@ -78,15 +78,33 @@ class Logger {
 		this.newline = true;
 	}
 
+	newLine(s) {
+		if (!this.newline)
+			this.file.write('.\n');
+		this.file.write(format_date(new Date()) + ' ' + s + ':');
+		this.newline = false;
+	}
+
+	append(s) {
+		this.file.write(' ' + s + ';');
+		this.newline = false;
+	}
+
+	endLine(s) {
+		this.file.write(' ' + s + '.\n');
+		this.newline = true;
+	}
+
+	close() {
+		if(!this.newline)
+			this.file.write('\n');
+	}
+
 	write(s) {
 		if (this.newline)
 			this.file.write(format_date(new Date()) + ' ');
 		this.file.write(s);
 		this.newline = false;
-	}
-	writeLine(s) {
-		this.write(s + '\n');
-		this.newline = true;
 	}
 }
 
@@ -94,11 +112,9 @@ function select_ships(planet, ships) {
 
 	casper.thenOpen(ogame.base_url + 'page=fleet1&cp=' + ogame.planet(planet).id.toString(), function() {
 
-		logger.write(planet + ': ');
+		logger.newLine(planet);
 
 		this.waitForSelector('div.fleetStatus div#slots', function() {
-			logger.write('fleet ');
-
 			if (this.exists('a#continue')) {
 
 				if (ships & ship.SMALL_CARGO) this.click('li#button202 > div > a');
@@ -108,12 +124,12 @@ function select_ships(planet, ships) {
 
 				if (this.exists('a#continue.on')) {
 					this.thenClick('#continue');
-					logger.write('selected; ');
+					logger.append('fleet');
 					return;
 				}
 			}
 
-			logger.writeLine('WARNING: No fleet available to send on ' + planet);
+			logger.append('WARNING: No fleet available to send on ' + planet);
 
 		}, function() {
 			ogame.abort('Could not open fleet page')
@@ -123,14 +139,13 @@ function select_ships(planet, ships) {
 
 function select_destination(system, position, type, speed) {
 	casper.waitForSelector('form[name="details"]', function then() {
-		logger.write('destination ');
 		this.fill('form[name="details"]', {
 			'type': String(type),
 			'speed': String(speed/10),
 			'system': String(system),
 			'position': String(position),
 		}, true);
-		logger.write('selected; ');
+		logger.append('destination');
 
 	}, function timeout() {
 		ogame.abort('Could not continue to destination page');
@@ -139,7 +154,6 @@ function select_destination(system, position, type, speed) {
 
 function send_mission(type, resources) {
 	casper.waitForSelector('a#start', function() {
-		logger.write('mission ');
 
 		if (type === mission.TRANSPORT)
 			this.click('#missionButton3');
@@ -162,9 +176,9 @@ function send_mission(type, resources) {
 
 		if (this.exists('a#start.on')) {
 			this.thenClick('a#start');
-			logger.write('selected; ')
+			logger.append('mission')
 		} else {
-			logger.writeLine('WARNING: Could not send fleet for some reason.')
+			logger.endLine('WARNING: Could not send fleet for some reason.')
 		}
 
 	}, function() {
@@ -172,10 +186,10 @@ function send_mission(type, resources) {
 	});
 
 	casper.waitForSelector('div.fleetStatus div#slots', function then() {
-		logger.writeLine('on route.');
+		logger.endLine('on route');
 
 	}, function() {
-		logger.write('Could not submit mission; ')
+		logger.endLine('Could not submit mission')
 
 		if (this.exists('#loginBtn')) {
 			ogame.abort('Upsie, logged out, fleet probably not on route.');
@@ -253,7 +267,7 @@ function recycle_all() {
 
 function return_flight(id) {
 	casper.then(function() {
-		logger.writeLine('Returning flight ' + id.toString());
+		logger.newLine('Returning flight ' + id.toString());
 		casper.thenOpen(ogame.base_url + 'page=movement&return=' + id.toString());
 	});
 }
@@ -308,7 +322,7 @@ function crawl_facilites(planet) {
 	casper.thenOpen(ogame.base_url + 'page=station&cp=' + planet.id.toString(), function() {
 
 		this.waitForSelector('div.station14 span.level', function() {
-			logger.writeLine('Facilities.');
+			logger.endLine('facilities');
 
 			var values = this.evaluate(function() {
 				var return_dict = {};
@@ -344,8 +358,10 @@ function crawl_resources(planet) {
 
 	casper.thenOpen(ogame.base_url + 'page=resources&cp=' + planet.id.toString(), function() {
 
+		logger.newLine(planet.name);
+
 		this.waitForSelector('div.supply1 span.level', function() {
-			logger.write(planet.name + ': Resources; ');
+			logger.append('resources');
 
 			var values = this.evaluate(function() {
 
@@ -395,7 +411,7 @@ function crawl_resources(planet) {
 	casper.thenOpen(ogame.base_url + 'page=resourceSettings&cp=' + planet.id.toString(), function() {
 
 		this.waitForSelector('table.listOfResourceSettingsPerPlanet span.dropdown a', function() {
-			logger.write('Settings; ');
+			logger.append('settings');
 
 			var values = this.evaluate(function() {
 				var effic = document.querySelectorAll('table.listOfResourceSettingsPerPlanet span.dropdown a');
@@ -447,7 +463,7 @@ function crawl_research() {
 	casper.thenOpen(ogame.base_url + 'page=research', function() {
 
 		this.waitForSelector('div#inhalt div#planet', function() {
-			logger.writeLine('Research page opened.');
+			logger.newLine('Research page opened');
 
 			var result = this.evaluate(function() {
 				var levels = {
@@ -491,7 +507,7 @@ function crawl_messages() {
 	casper.thenOpen(ogame.base_url + 'page=messages', function() {
 
 		this.waitForSelector('ul.pagination', function() {
-			logger.writeLine('Messages page open.');
+			logger.newLine('Messages page open');
 
 			values = this.evaluate(function() {
 
@@ -644,6 +660,8 @@ function parseCli() {
 
 		casper.then(ogame.dump_results);
 
+		casper.then(function(){logger.close()});
+
 	} else {
 		usage();
 	}
@@ -704,7 +722,7 @@ class Ogame {
 		casper.on('resource.requested', function(data, request) {
 			blocked_urls.forEach(function(name){
 				if (data.url.indexOf(name) != -1) {
-					//logger.write("Aborting request to " + data.url)
+					//logger.endLine("Aborting request to " + data.url)
 					request.abort();
 				}
 			});
@@ -717,15 +735,15 @@ class Ogame {
 
 	open() {
 		casper.start(this.base_url, function() {
-			logger.write('Page open: ');
+			logger.newLine('Page open');
 		});
 
 		casper.waitForSelector('#detailWrapper', function() {
-			logger.writeLine('logged in.');
+			logger.append('logged in');
 			ogame.result('logged_in', true);
 
 		}, function() {
-			logger.write('not logged in; ');
+			logger.append('logged out');
 			ogame.result('logged_in', false);
 			ogame.login();
 		}, 2000);
@@ -738,7 +756,7 @@ class Ogame {
 
 		casper.waitForSelector('#loginBtn', function() {
 
-			logger.write('login page open; ');
+			logger.append('ready');
 			ogame.result('logged_in', false);
 
 			this.click('#loginBtn');
@@ -749,7 +767,7 @@ class Ogame {
 			}, true);
 
 			this.waitForSelector('#detailWrapper', function() {
-				logger.writeLine('login done.');
+				logger.append('logged in');
 				cookies.save();
 
 			}, function() {
@@ -774,7 +792,7 @@ class Ogame {
 		screenshot('abort.png');
 		this.result('success', false);
 		this.dump_results();
-		logger.writeLine(reason);
+		logger.endLine('ABORT: ' + reason);
 		casper.exit();
 	}
 
@@ -791,19 +809,19 @@ class Ogame {
 		});
 
 		casper.waitForSelector(flights_selector, function() {
-			logger.writeLine('Fleet movements opened.');
+			logger.newLine('Fleet movements opened');
 
 		}, function() {
-			logger.write('Could not open fleet movements; ')
+			logger.newLine('Could not open fleet movements');
 
 			if (casper.exists('a#continue')) {
-				logger.writeLine('No movements at this moment.');
+				logger.endLine('no movements at this moment');
 
 			} else if (casper.exists('#loginBtn')) {
-				ogame.abort('Upsie, logged out.');
+				ogame.abort('Upsie, logged out');
 
 			} else {
-				ogame.abort('Still logged in but something went wrong.');
+				ogame.abort('Still logged in but something went wrong');
 			}
 		}, 2000);
 
@@ -827,14 +845,14 @@ class Ogame {
 				});
 				ogame.result('total_unread_messages', total_messages);
 			} else {
-				logger.writeLine('Could not find messages icon.')
+				logger.newLine('Could not find messages icon.')
 			}
 		});
 	}
 
 	crawl_planet_list() {
 		casper.waitForSelector('div#planetList', function() {
-			logger.write('Collecting planets info; ')
+			logger.append('collecting info')
 
 			var result = this.evaluate(function() {
 				var return_dict = {};
@@ -877,7 +895,7 @@ class Ogame {
 
 			//ogame.result('planets', result);
 			ogame.planets = result;
-			logger.writeLine('Saved.')
+			logger.endLine('done')
 		}, function() {
 			ogame.abort('Could not find planet list.')
 		});
