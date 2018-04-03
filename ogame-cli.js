@@ -125,11 +125,13 @@ function select_ships(planet, ships) {
 				if (this.exists('a#continue.on')) {
 					this.thenClick('#continue');
 					logger.append('fleet');
+					mission_continue = true;
 					return;
 				}
 			}
 
 			logger.append('WARNING: No fleet available to send on ' + planet);
+			mission_continue = false;
 
 		}, function() {
 			ogame.abort('Could not open fleet page')
@@ -138,64 +140,73 @@ function select_ships(planet, ships) {
 }
 
 function select_destination(system, position, type, speed) {
-	casper.waitForSelector('form[name="details"]', function then() {
-		this.fill('form[name="details"]', {
-			'type': String(type),
-			'speed': String(speed/10),
-			'system': String(system),
-			'position': String(position),
-		}, true);
-		logger.append('destination');
+	casper.then(function() {
+		if(!mission_continue)
+			return;
+		casper.waitForSelector('form[name="details"]', function then() {
+			this.fill('form[name="details"]', {
+				'type': String(type),
+				'speed': String(speed/10),
+				'system': String(system),
+				'position': String(position),
+			}, true);
+			logger.append('destination');
 
-	}, function timeout() {
-		ogame.abort('Could not continue to destination page');
+		}, function timeout() {
+			ogame.endLine('Could not continue to destination page');
+			mission_continue = false;
+		});
 	});
 }
 
 function send_mission(type, resources) {
-	casper.waitForSelector('a#start', function() {
+	casper.then(function() {
+		if(!mission_continue)
+			return;
+		casper.waitForSelector('a#start', function() {
 
-		if (type === mission.TRANSPORT)
-			this.click('#missionButton3');
-		else if (type === mission.TRANSFER)
-			this.click('#missionButton4');
-		else if (type === mission.RECYCLE)
-			this.click('#missionButton8');
-		else if (type === mission.EXPLORATION)
-			this.click('#missionButton15');
+			if (type === mission.TRANSPORT)
+				this.click('#missionButton3');
+			else if (type === mission.TRANSFER)
+				this.click('#missionButton4');
+			else if (type === mission.RECYCLE)
+				this.click('#missionButton8');
+			else if (type === mission.EXPLORATION)
+				this.click('#missionButton15');
 
-		for (i = 0; i < resources.length; ++i) {
-			if (resources[i] === ore.METAL)
-				this.evaluate(function() {maxMetal();});
-			else if (resources[i] === ore.CRYSTAL)
-				this.evaluate(function() {maxCrystal();});
-			else if (resources[i] === ore.DEUTERIUM)
-				this.evaluate(function() {maxDeuterium();});
-		}
-		this.evaluate(function() {updateVariables();}); // This is a function from the ogame JS
+			for (i = 0; i < resources.length; ++i) {
+				if (resources[i] === ore.METAL)
+					this.evaluate(function() {maxMetal();});
+				else if (resources[i] === ore.CRYSTAL)
+					this.evaluate(function() {maxCrystal();});
+				else if (resources[i] === ore.DEUTERIUM)
+					this.evaluate(function() {maxDeuterium();});
+			}
+			this.evaluate(function() {updateVariables();}); // This is a function from the ogame JS
 
-		if (this.exists('a#start.on')) {
-			this.thenClick('a#start');
-			logger.append('mission')
-		} else {
-			logger.endLine('WARNING: Could not send fleet for some reason.')
-		}
+			if (this.exists('a#start.on')) {
+				this.thenClick('a#start');
+				logger.append('mission')
+			} else {
+				logger.endLine('WARNING: Could not send fleet for some reason.')
+			}
 
-	}, function() {
-		ogame.abort('Could not load mission page')
-	});
+		}, function() {
+			ogame.abort('Could not load mission page')
+		});
 
-	casper.waitForSelector('div.fleetStatus div#slots', function then() {
-		logger.endLine('on route');
+		casper.waitForSelector('div.fleetStatus div#slots', function then() {
+			logger.endLine('on route');
 
-	}, function() {
-		logger.endLine('Could not submit mission')
+		}, function() {
+			logger.endLine('Could not submit mission')
 
-		if (this.exists('#loginBtn')) {
-			ogame.abort('Upsie, logged out, fleet probably not on route.');
-		} else {
-			ogame.abort('Still logged in but something went wrong, fleet probably not on route.');
-		}
+			if (this.exists('#loginBtn')) {
+				ogame.abort('Upsie, logged out, fleet probably not on route.');
+			} else {
+				ogame.abort('Still logged in but something went wrong, fleet probably not on route.');
+			}
+		});
 	});
 }
 
@@ -814,7 +825,7 @@ class Ogame {
 		}, function() {
 			logger.newLine('Could not open fleet movements');
 
-			if (casper.exists('a#continue')) {
+			if (casper.exists('a#continue') || casper.exists('div#warning p span.icon_warning')) {
 				logger.endLine('no movements at this moment');
 
 			} else if (casper.exists('#loginBtn')) {
