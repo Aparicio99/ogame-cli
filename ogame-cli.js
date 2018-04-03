@@ -584,100 +584,6 @@ function get_info(query) {
 	}
 }
 
-function usage() {
-	casper.echo('Usage: casperjs ogame.js (collect_all|recycle_all|fleetsave|transfer|transport|return|list) [options]');
-	casper.exit();
-}
-
-function parseCli() {
-
-	// Convert all arguments to string and lowercase
-	var args = [];
-	for (i = 0; i < casper.cli.args.length; ++i) {
-		args[i] = casper.cli.get(i).toString().toLowerCase();
-	}
-
-	if (args.length > 0) {
-		switch(args[0]) {
-
-			case 'collect_all':
-				if (args.length == 2)
-					collect_all(args[1]);
-				else
-					usage();
-				break;
-
-			case 'recycle_all':
-				if (args.length == 1)
-					recycle_all();
-				else
-					usage();
-				break;
-
-			case 'transfer':
-				if (args.length == 4)
-					transferir(args[1], args[2], parseInt(args[3]))
-				else
-					usage();
-				break;
-
-			case 'transport':
-				if (args.length == 4)
-					transportar(args[1], args[2], parseInt(args[3]))
-				else
-					usage();
-				break;
-
-			case 'recycle':
-				if (args.length == 4)
-					reciclar(args[1], args[2], parseInt(args[3]))
-				else
-					usage();
-				break;
-
-			case 'explore':
-				if (args.length == 3)
-					explorar(args[1], parseInt(args[2]))
-				else
-					usage();
-				break;
-
-			case 'return':
-				if (args.length == 2)
-					return_flight(parseInt(args[1]));
-				else
-					usage();
-				break;
-
-			case 'list':
-				break;
-
-			case 'get':
-				if (args.length == 2)
-					get_info(args[1]);
-				else
-					usage();
-				break;
-
-			default:
-				usage();
-		}
-
-		screenshot('last.png')
-
-		ogame.list_flights();
-
-		ogame.get_unread_messages();
-
-		casper.then(ogame.dump_results);
-
-		casper.then(function(){logger.close()});
-
-	} else {
-		usage();
-	}
-}
-
 class Cookies {
 	constructor(filename) {
 		this.file = filename;
@@ -849,16 +755,14 @@ class Ogame {
 	}
 
 	get_unread_messages() {
-		casper.then(function() {
-			if(casper.exists('span.new_msg_count.totalMessages.news')) {
-				var total_messages = this.evaluate(function() {
-					return parseInt(document.querySelector('span.new_msg_count.totalMessages.news').getAttribute('data-new-messages'));
-				});
-				ogame.result('total_unread_messages', total_messages);
-			} else {
-				logger.newLine('Could not find messages icon.')
-			}
-		});
+		if(casper.exists('span.new_msg_count.totalMessages.news')) {
+			var total_messages = casper.evaluate(function() {
+				return parseInt(document.querySelector('span.new_msg_count.totalMessages.news').getAttribute('data-new-messages'));
+			});
+			ogame.result('total_unread_messages', total_messages);
+		} else {
+			logger.newLine('Could not find messages icon.')
+		}
 	}
 
 	crawl_planet_list() {
@@ -917,6 +821,67 @@ class Ogame {
 	}
 }
 
+class Executor {
+	constructor(func_map) {
+		this.commands = func_map;
+	}
+
+	parse(cli_args) {
+
+		if (cli_args.length < 1)
+			return false;
+
+		var cmd_name = cli_args[0];
+
+		var args = [];
+		for (var i = 1; i < cli_args.length; i++) {
+			args[i-1] = cli_args[i].toString().toLowerCase();
+		}
+
+		var cmd = this.commands[cmd_name];
+		if (cmd == undefined)
+			return false;
+
+		if (cmd.args.length != args.length)
+			return false;
+
+		for (var i = 0; i < args.length; i++) {
+			var type = cmd.args[i][0];
+			switch(type) {
+				case 'number':
+					if (isNaN(parseInt(args[i])))
+						return false;
+					break;
+				case 'string':
+					break;
+			}
+		}
+
+		this.args = args;
+		this.chosen_one = cmd.func;
+
+		return true;
+	}
+
+	run() {
+		if (this.chosen_one != undefined)
+			this.chosen_one(this.args);
+	}
+
+	usage() {
+		casper.echo('Usage: ogame-cli <cmd> [<args>]')
+		casper.echo('Supported commands:')
+		for (var cmd in this.commands) {
+			var line = '  ' + cmd;
+			var args = this.commands[cmd].args;
+			for (var i = 0; i < args.length; i++)
+				 line += ' <' + args[i][1] + '>';
+			casper.echo(line);
+		}
+		casper.exit();
+	}
+}
+
 var casper = require('casper').create({
 	verbose: true,
 	//logLevel: 'debug',
@@ -925,19 +890,93 @@ var utils = require('utils');
 var system = require('system');
 var fs = require('fs');
 
-var logger = new Logger(log_file);
-
-var cookies = new Cookies(cookie_jar);
-
-var ogame = new Ogame(config_file);
-
-// Run one time to login and collect planets data
-casper.run(function() {
-	// And only after that run the action requested from the cli
-	// This way the second run can use the planet data collected before
-	parseCli();
-	casper.run();
+var executor = new Executor({
+	'list': {
+		args: [],
+		func: function(args){ },
+	},
+	'get': {
+		args: [
+			['string', 'flights|research|messages|resources|planets|all'],
+		],
+		func: function(args){ get_info(args[0]) },
+	},
+	'collect_all': {
+		args: [
+			['string', 'destination'],
+		 ],
+		func: function(args){ collect_all(args[0]) },
+	},
+	'recycle_all': {
+		args: [],
+		func: function(args){ recycle_all() },
+	},
+	'transfer': {
+		args: [
+			['string', 'origin'],
+			['string', 'destination'],
+			['string', 'speed (10 to 100 in increments of 10'],
+		],
+		func: function(args){ transferir(args[0], args[1], parseInt(args[2])) },
+	},
+	'transport': {
+		args: [
+			['string', 'origin'],
+			['string', 'destination'],
+			['string', 'speed (10 to 100 in increments of 10'],
+		],
+		func: function(args){ transport(args[0], args[1], parseInt(args[2])) },
+	},
+	'recycle': {
+		args: [
+			['string', 'origin'],
+			['string', 'destination'],
+			['string', 'speed (10 to 100 in increments of 10'],
+		],
+		func: function(args){ recycle(args[0], args[1], parseInt(args[2])) },
+	},
+	'explore': {
+		args: [
+			['string', 'origin'],
+			['string', 'speed (10 to 100 in increments of 10'],
+		],
+		func: function(args){ explorar(args[0], parseInt(args[1])) },
+	},
+	'return': {
+		args: [
+			['number', 'id of the flight'],
+		],
+		func: function(args){ return_flight(parseInt(args[0])) },
+	},
 });
 
+if (!executor.parse(casper.cli.args)) {
+	executor.usage();
+
+} else {
+
+	var logger  = new Logger(log_file);
+	var cookies = new Cookies(cookie_jar);
+	var ogame   = new Ogame(config_file);
+
+	// Run one time to login and collect planets data
+	casper.run(function() {
+		// And only after that run the action requested from the cli
+		// This way the second run can use the planet data collected before
+		executor.run();
+
+		screenshot('last.png')
+
+		ogame.list_flights();
+
+		casper.then(function() {
+			ogame.get_unread_messages();
+			ogame.dump_results();
+			logger.close();
+		});
+
+		casper.run();
+	});
+}
 
 // vim: ts=4:sw=4
