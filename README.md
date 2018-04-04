@@ -27,8 +27,9 @@ It is written in Javascript, using [CasperJS](http://casperjs.org/) as browser A
 	 - Research levels
 	 - Unread messages
 	 - Planets resources, mines and facilities levels
- - Saves screenshots of certain pages.
  - Saves and restores sessions cookies to avoid unnecessary logins.
+ - Saves screenshots of certain pages.
+ - Logs the web page steps on the file `stderr.log`.
 
 This tool was develop solely in mind for a [Miner](http://ogame.wikia.com/wiki/Miner) type of playing, first to automate tasks that became boring after having lots of planets, and afterwards to integrate with a higher layer tool that serves as dashboard and mission scheduler (to be published).
 
