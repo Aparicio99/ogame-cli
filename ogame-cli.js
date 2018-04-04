@@ -872,12 +872,14 @@ class Executor {
 		casper.echo('Usage: ogame-cli <cmd> [<args>]')
 		casper.echo('Supported commands:')
 		for (var cmd in this.commands) {
-			var line = '  ' + cmd;
+			var line = '  - ' + cmd;
 			var args = this.commands[cmd].args;
 			for (var i = 0; i < args.length; i++)
 				 line += ' <' + args[i][1] + '>';
 			casper.echo(line);
 		}
+		casper.echo('  <origin> and <destination> is the name of the planet or moon (case-insensitive).');
+		casper.echo('  <speed> must be one this values: 10, 20, 30, 40, 50, 60, 70, 80, 90, 100.');
 		casper.exit();
 	}
 }
@@ -904,7 +906,7 @@ var executor = new Executor({
 	'collect_all': {
 		args: [
 			['string', 'destination'],
-		 ],
+		],
 		func: function(args){ collect_all(args[0]) },
 	},
 	'recycle_all': {
@@ -915,7 +917,7 @@ var executor = new Executor({
 		args: [
 			['string', 'origin'],
 			['string', 'destination'],
-			['string', 'speed (10 to 100 in increments of 10'],
+			['number', 'speed'],
 		],
 		func: function(args){ transferir(args[0], args[1], parseInt(args[2])) },
 	},
@@ -923,7 +925,7 @@ var executor = new Executor({
 		args: [
 			['string', 'origin'],
 			['string', 'destination'],
-			['string', 'speed (10 to 100 in increments of 10'],
+			['string', 'speed'],
 		],
 		func: function(args){ transport(args[0], args[1], parseInt(args[2])) },
 	},
@@ -931,14 +933,14 @@ var executor = new Executor({
 		args: [
 			['string', 'origin'],
 			['string', 'destination'],
-			['string', 'speed (10 to 100 in increments of 10'],
+			['string', 'speed'],
 		],
 		func: function(args){ recycle(args[0], args[1], parseInt(args[2])) },
 	},
 	'explore': {
 		args: [
 			['string', 'origin'],
-			['string', 'speed (10 to 100 in increments of 10'],
+			['string', 'speed'],
 		],
 		func: function(args){ explorar(args[0], parseInt(args[1])) },
 	},
